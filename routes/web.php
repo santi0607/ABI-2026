@@ -18,6 +18,7 @@ use App\Http\Controllers\ThematicAreaController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\ProjectController;
 use App\Http\Controllers\ProjectEvaluationController;
+use App\Http\Controllers\ProjectVersionController;
 use App\Http\Controllers\BankApprovedIdeasForStudentsController;
 use App\Http\Controllers\BankApprovedIdeasForProfessorsController;
 use App\Http\Controllers\CityProgramController;
@@ -118,6 +119,13 @@ Route::middleware(['auth'])->group(function () {
         ->name('participants.index');
 
     Route::resource('projects', ProjectController::class)->except(['destroy']);
+
+    Route::prefix('projects/{project}/versions')->name('projects.versions.')->group(function () {
+        Route::get('/', [ProjectVersionController::class, 'index'])->name('index');
+        Route::get('/create', [ProjectVersionController::class, 'create'])->name('create');
+        Route::get('/{version}', [ProjectVersionController::class, 'show'])->name('show');
+        Route::get('/{version}/edit', [ProjectVersionController::class, 'edit'])->name('edit');
+    });
 });
 
 Route::middleware(['auth', 'role:committee_leader'])->prefix('comite/projects/evaluation')->name('projects.evaluation.')->group(function () {

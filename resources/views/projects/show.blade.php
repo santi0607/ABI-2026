@@ -30,6 +30,9 @@
                 </div>
                 <div class="col-auto ms-auto d-print-none">
                     <a href="{{ route('projects.index') }}" class="btn btn-outline-secondary">Volver al listado</a>
+                    @if($canViewVersionHistory)
+                        <a href="{{ route('projects.versions.index', $project) }}" class="btn btn-outline-primary">Ver historial</a>
+                    @endif
                     @if($canEdit && !$isResearchStaff)
                         <a href="{{ route('projects.edit', $project) }}" class="btn btn-primary">Editar</a>
                     @endif
@@ -47,7 +50,7 @@
                 <div class="alert alert-danger">{{ session('error') }}</div>
             @endif
 
-            @if (($isProfessor || $isCommitteeLeader) && ($project->projectStatus?->name === 'Devuelto para corrección') && !empty($reviewComment))
+            @if (\Illuminate\Support\Str::of($project->projectStatus?->name ?? '')->ascii()->lower()->squish()->toString() === 'devuelto para correccion' && !empty($reviewComment))
                 <div class="card border-danger mb-3">
                     <div class="card-header bg-danger text-white">
                         Comentarios del revisor
@@ -73,10 +76,10 @@
                             </div>
                             @php
                                 // Reuse the badge mapping to keep the status consistent with the listing view.
-                                $normalizedStatus = \Illuminate\Support\Str::lower($statusName);
+                                $normalizedStatus = \Illuminate\Support\Str::of($statusName)->ascii()->lower()->squish()->toString();
                                 $statusClasses = [
-                                    'pendiente de aprobación' => 'bg-warning text-dark',
-                                    'devuelto para corrección' => 'bg-danger text-white',
+                                    'pendiente de aprobacion' => 'bg-warning text-dark',
+                                    'devuelto para correccion' => 'bg-danger text-white',
                                     'aprobado' => 'bg-success text-white',
                                     'waiting evaluation' => 'bg-primary text-white',
                                 ];
@@ -237,3 +240,6 @@
         }
     </style>
 @endpush
+
+
+

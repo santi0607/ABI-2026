@@ -25,6 +25,8 @@ class Version extends Model
      */
     protected $fillable = [
         'project_id',
+        'created_by_user_id',
+        'snapshot',
     ];
 
     /**
@@ -34,6 +36,8 @@ class Version extends Model
      */
     protected $casts = [
         'project_id' => 'integer',
+        'created_by_user_id' => 'integer',
+        'snapshot' => 'array',
     ];
 
     /**
@@ -42,6 +46,14 @@ class Version extends Model
     public function project(): BelongsTo
     {
         return $this->belongsTo(Project::class, 'project_id', 'id');
+    }
+
+    /**
+     * User who generated the version snapshot.
+     */
+    public function createdBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by_user_id', 'id');
     }
 
     /**

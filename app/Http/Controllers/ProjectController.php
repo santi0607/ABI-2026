@@ -389,10 +389,10 @@ class ProjectController extends Controller
         $latestVersion = $project->versions->first();
         $contentValues = $this->mapContentValues($latestVersion);
 
-        $normalizedStatus = Str::lower($project->projectStatus->name ?? '');
+        $normalizedStatus = $this->normalizeStatusName($project->projectStatus->name ?? '');
         $reviewComment = null;
 
-        if ($normalizedStatus === 'devuelto para corrección' && $latestVersion) {
+        if ($normalizedStatus === 'devuelto para correccion' && $latestVersion) {
             $reviewContent = $latestVersion->contentVersions
                 ->first(static function (ContentVersion $contentVersion): bool {
                     return Str::lower($contentVersion->content->name ?? '') === 'comentarios';
@@ -404,7 +404,7 @@ class ProjectController extends Controller
         $user = AuthUserHelper::fullUser();
 
         $statusName = $project->projectStatus->name ?? 'Sin estado';
-        $canEdit = Str::lower($statusName) === 'devuelto para corrección';
+        $canEdit = $this->isReturnedForCorrection($project);
 
         return view('projects.show', [
             'project' => $project,
@@ -417,7 +417,8 @@ class ProjectController extends Controller
             'isResearchStaff' =>  $user?->role === 'research_staff',
             'reviewComment' => $reviewComment,
             'canEdit' => $canEdit,
-            'statusName' => $statusName
+            'statusName' => $statusName,
+            'canViewVersionHistory' => $this->canViewVersionHistory($project, $user),
         ]); 
     }
 
@@ -564,14 +565,14 @@ class ProjectController extends Controller
     public function edit(Project $project): View
     {
 
-        $statusName = Str::lower($project->projectStatus->name ?? ''); // Normalize the status name to apply guards consistently.
+        $statusName = $this->normalizeStatusName($project->projectStatus->name ?? ''); // Normalize the status name to apply guards consistently.
 
-        if ($statusName === 'pendiente de aprobación') {
+        if ($statusName === 'pendiente de aprobacion') {
             abort(403, 'Projects pending approval cannot be edited.'); // Block editing attempts when the project is waiting for approval.
         }
 
-        if ($project->projectStatus?->name !== 'Devuelto para corrección') {
-            abort(403, 'Solo los proyectos devueltos para corrección pueden ser editados.');
+        if (! $this->isReturnedForCorrection($project)) {
+            abort(403, 'Solo los proyectos devueltos para correcci�n pueden ser editados.');
         }
 
         [$user, $isProfessor, $isStudent, $isResearchStaff, $isCommitteeLeader] = $this->ensureRoleAccess(true); // Include committee leaders in the edit flow to mirror professor capabilities.
@@ -735,14 +736,14 @@ class ProjectController extends Controller
      */
     public function update(Request $request, Project $project): RedirectResponse
     {
-        $statusName = Str::lower($project->projectStatus->name ?? ''); // Normalize again on update to avoid duplicated string comparisons.
+        $statusName = $this->normalizeStatusName($project->projectStatus->name ?? ''); // Normalize again on update to avoid duplicated string comparisons.
 
-        if ($statusName === 'pendiente de aprobación') {
+        if ($statusName === 'pendiente de aprobacion') {
             abort(403, 'Projects pending approval cannot be edited.'); // Prevent updates when the UI should hide the edit button.
         }
 
-        if ($project->projectStatus?->name !== 'Devuelto para corrección') {
-            abort(403, 'Solo los proyectos devueltos para corrección pueden ser editados.');
+        if (! $this->isReturnedForCorrection($project)) {
+            abort(403, 'Solo los proyectos devueltos para correcci�n pueden ser editados.');
         }
 
         [$user, $isProfessor, $isStudent, $isResearchStaff] = $this->ensureRoleAccess(true);
@@ -815,17 +816,23 @@ class ProjectController extends Controller
      */
     protected function contentId(string $name): int
     {
-        if (! array_key_exists($name, $this->contentCache)) {
-            $content = Content::query()->where('name', $name)->first();
-            if (! $content) {
-                throw new \RuntimeException("Content '{$name}' not found in catalog.");
-            }
-            $this->contentCache[$name] = $content->id;
+        $normalizedName = $this->normalizeContentName($name);
+
+        if (empty($this->contentCache)) {
+            $this->contentCache = Content::query()
+                ->get(['id', 'name'])
+                ->mapWithKeys(function (Content $content) {
+                    return [$this->normalizeContentName($content->name) => $content->id];
+                })
+                ->toArray();
         }
 
-        return $this->contentCache[$name];
-    }
+        if (! array_key_exists($normalizedName, $this->contentCache)) {
+            throw new \RuntimeException("Content '{$name}' not found in catalog.");
+        }
 
+        return $this->contentCache[$normalizedName];
+    }
     /**
      * Resolve the identifier for the status representing "waiting evaluation".
      */
@@ -861,12 +868,12 @@ class ProjectController extends Controller
         }
 
         return $version->contentVersions
-            ->mapWithKeys(static function (ContentVersion $contentVersion) {
-                return [$contentVersion->content->name => $contentVersion->value];
+            ->filter(static fn (ContentVersion $contentVersion) => $contentVersion->content !== null)
+            ->mapWithKeys(function (ContentVersion $contentVersion) {
+                return [$this->contentDisplayName($contentVersion->content->name) => $contentVersion->value];
             })
             ->toArray();
     }
-
     /**
      * Persist the project data for a professor either creating or updating a record.
      */
@@ -979,8 +986,6 @@ class ProjectController extends Controller
             $contentFrameworkIds = array_values(array_filter($validated['content_frameworks'] ?? []));
             $project->contentFrameworks()->sync($contentFrameworkIds);
 
-            $version = $project->versions()->create();
-
             $contentMap = [
                 'Título' => $project->title,
                 'Cantidad de estudiantes' => (string) $validated['students_count'],
@@ -993,7 +998,7 @@ class ProjectController extends Controller
                 'Descripción del proyecto de investigación' => $validated['description'],
             ];
 
-            $this->storeContentValues($version, $contentMap);
+            $this->storeProjectVersion($project, $contentMap, $professor->user_id);
 
             DB::commit();
         } catch (\Throwable $exception) {
@@ -1163,15 +1168,13 @@ class ProjectController extends Controller
             $contentFrameworkIds = array_values(array_filter($validated['content_frameworks'] ?? []));
             $project->contentFrameworks()->sync($contentFrameworkIds);
 
-            $version = $project->versions()->create();
-
             $contentMap = [
                 'Título' => $project->title,
                 'Objetivo general del proyecto' => $validated['general_objective'],
                 'Descripción del proyecto de investigación' => $validated['description'],
             ];
 
-            $this->storeContentValues($version, $contentMap);
+            $this->storeProjectVersion($project, $contentMap, $student->user_id);
 
             DB::commit();
         } catch (\Throwable $exception) {
@@ -1186,6 +1189,215 @@ class ProjectController extends Controller
         return redirect()
             ->route('projects.index')
             ->with('success', $message);
+    }
+
+    /**
+     * Determine whether the authenticated user can consult the version history.
+     */
+    protected function canViewVersionHistory(Project $project, ?User $user): bool
+    {
+        return $user !== null;
+    }
+
+    /**
+     * Normalize project status names so comparisons survive accent and casing differences.
+     */
+    protected function normalizeStatusName(?string $name): string
+    {
+        return Str::of((string) $name)
+            ->ascii()
+            ->lower()
+            ->squish()
+            ->toString();
+    }
+
+    /**
+     * Determine whether the project is currently pending approval.
+     */
+    protected function isPendingApproval(Project $project): bool
+    {
+        return $this->normalizeStatusName($project->projectStatus->name ?? '') === 'pendiente de aprobacion';
+    }
+
+    /**
+     * Determine whether the project can be corrected and resubmitted.
+     */
+    protected function isReturnedForCorrection(Project $project): bool
+    {
+        return $this->normalizeStatusName($project->projectStatus->name ?? '') === 'devuelto para correccion';
+    }
+    /**
+     * Normalize content names so the code works with accented and plain-text catalog values.
+     */
+    protected function normalizeContentName(?string $name): string
+    {
+        return Str::of((string) $name)
+            ->ascii()
+            ->lower()
+            ->replace('-', ' ')
+            ->squish()
+            ->toString();
+    }
+
+    /**
+     * Convert catalog names into the labels expected by the project forms and history screens.
+     */
+    protected function contentDisplayName(?string $name): string
+    {
+        $normalizedName = $this->normalizeContentName($name);
+
+        return [
+            'titulo' => 'Título',
+            'cantidad de estudiantes' => 'Cantidad de estudiantes',
+            'tiempo de ejecucion' => 'Tiempo de ejecución',
+            'viabilidad' => 'Viabilidad',
+            'pertinencia con el grupo de investigacion y con el programa' => 'Pertinencia con el grupo de investigación y con el programa',
+            'disponibilidad de docentes para su direccion y calificacion' => 'Disponibilidad de docentes para su dirección y calificación',
+            'calidad y correspondencia entre titulo y objetivo' => 'Calidad y correspondencia entre título y objetivo',
+            'objetivo general del proyecto' => 'Objetivo general del proyecto',
+            'descripcion del proyecto de investigacion' => 'Descripción del proyecto de investigación',
+            'comentarios' => 'Comentarios',
+        ][$normalizedName] ?? (string) $name;
+    }
+
+    /**
+     * Create a version record that captures the current project snapshot.
+     */
+    protected function storeProjectVersion(Project $project, array $contentMap, ?int $createdByUserId): Version
+    {
+        $project->load([
+            'projectStatus',
+            'thematicArea.investigationLine',
+            'contentFrameworks.framework',
+            'professors.user',
+            'students.user',
+        ]);
+
+        $version = $project->versions()->create([
+            'created_by_user_id' => $createdByUserId,
+            'snapshot' => $this->sanitizeSnapshot($this->buildProjectVersionSnapshot($project, $contentMap)),
+        ]);
+
+        $this->storeContentValues($version, $contentMap);
+
+        return $version;
+    }
+
+    /**
+     * Build a portable snapshot so each version preserves the project state of that moment.
+     */
+    protected function buildProjectVersionSnapshot(Project $project, array $contentMap): array
+    {
+        return [
+            'title' => $project->title,
+            'evaluation_criteria' => $project->evaluation_criteria,
+            'project_status' => [
+                'id' => $project->projectStatus?->id,
+                'name' => $project->projectStatus?->name,
+            ],
+            'thematic_area' => [
+                'id' => $project->thematicArea?->id,
+                'name' => $project->thematicArea?->name,
+            ],
+            'investigation_line' => [
+                'id' => $project->thematicArea?->investigationLine?->id,
+                'name' => $project->thematicArea?->investigationLine?->name,
+            ],
+            'contents' => collect($contentMap)
+                ->mapWithKeys(function ($value, $label) {
+                    return [$this->contentDisplayName($label) => (string) $value];
+                })
+                ->toArray(),
+            'frameworks' => $project->contentFrameworks
+                ->map(function ($contentFramework) {
+                    return [
+                        'id' => $contentFramework->id,
+                        'name' => $contentFramework->name,
+                        'framework' => [
+                            'id' => $contentFramework->framework?->id,
+                            'name' => $contentFramework->framework?->name,
+                        ],
+                    ];
+                })
+                ->values()
+                ->all(),
+            'participants' => [
+                'professors' => $project->professors
+                    ->map(function (Professor $professor) {
+                        return [
+                            'id' => $professor->id,
+                            'name' => trim(($professor->name ?? '') . ' ' . ($professor->last_name ?? '')),
+                            'email' => $professor->mail ?? $professor->user?->email,
+                            'phone' => $professor->phone,
+                        ];
+                    })
+                    ->values()
+                    ->all(),
+                'students' => $project->students
+                    ->map(function (Student $student) {
+                        return [
+                            'id' => $student->id,
+                            'name' => trim(($student->name ?? '') . ' ' . ($student->last_name ?? '')),
+                            'card_id' => $student->card_id,
+                            'phone' => $student->phone,
+                        ];
+                    })
+                    ->values()
+                    ->all(),
+            ],
+        ];
+    }
+
+    /**
+     * Sanitize the snapshot payload so it can always be stored as valid UTF-8 JSON.
+     */
+    protected function sanitizeSnapshot(array $snapshot): array
+    {
+        return $this->sanitizeSnapshotValue($snapshot);
+    }
+
+    /**
+     * Recursively normalize keys and values before JSON encoding them.
+     */
+    protected function sanitizeSnapshotValue(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            $sanitized = [];
+
+            foreach ($value as $key => $item) {
+                $sanitizedKey = is_string($key)
+                    ? $this->sanitizeSnapshotString($key)
+                    : $key;
+
+                $sanitized[$sanitizedKey] = $this->sanitizeSnapshotValue($item);
+            }
+
+            return $sanitized;
+        }
+
+        if (is_string($value)) {
+            return $this->sanitizeSnapshotString($value);
+        }
+
+        return $value;
+    }
+
+    /**
+     * Normalize strings that may contain mixed encodings before storing JSON snapshots.
+     */
+    protected function sanitizeSnapshotString(string $value): string
+    {
+        if (mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+
+        $sanitized = @iconv('Windows-1252', 'UTF-8//IGNORE', $value);
+
+        if ($sanitized !== false && $sanitized !== '') {
+            return $sanitized;
+        }
+
+        return mb_convert_encoding($value, 'UTF-8', 'Windows-1252');
     }
 
     /**
@@ -1206,3 +1418,5 @@ class ProjectController extends Controller
         }
     }
 }
+
+

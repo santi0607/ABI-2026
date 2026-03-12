@@ -143,10 +143,10 @@
                                     @php
                                         // Map each status to a high-contrast badge class to meet accessibility requirements.
                                         $statusName = $project->projectStatus->name ?? 'Sin estado';
-                                        $normalizedStatus = \Illuminate\Support\Str::lower($statusName);
+                                        $normalizedStatus = \Illuminate\Support\Str::of($statusName)->ascii()->lower()->squish()->toString();
                                         $statusClasses = [
-                                            'pendiente de aprobación' => 'bg-warning text-dark',
-                                            'devuelto para corrección' => 'bg-danger text-white',
+                                            'pendiente de aprobacion' => 'bg-warning text-dark',
+                                            'devuelto para correccion' => 'bg-danger text-white',
                                             'aprobado' => 'bg-success text-white',
                                             'waiting evaluation' => 'bg-primary text-white',
                                         ];
@@ -170,7 +170,7 @@
                                     <td>
                                         <div class="btn-list flex-nowrap">
                                             <a href="{{ route('projects.show', $project) }}" class="btn btn-outline-secondary btn-sm">Ver</a>
-                                            @if($project->projectStatus?->name === 'Devuelto para corrección' && !$isCommitteeLeader && !$isResearchStaff)
+                                            @if($normalizedStatus === 'devuelto para correccion' && !$isResearchStaff)
                                                 <a href="{{ route('projects.edit', $project) }}" class="btn btn-outline-primary btn-sm">
                                                     Editar
                                                 </a>
@@ -196,3 +196,6 @@
         </div>
     </div>
 @endsection
+
+
+
