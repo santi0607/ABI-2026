@@ -105,7 +105,7 @@ El proyecto sigue el patrón **MVC (Model-View-Controller)** de Laravel:
 1. **Clonar el repositorio**
    ```bash
    git clone <url-del-repositorio>
-   cd abi-mio
+   cd abi
    ```
 
 2. **Instalar dependencias PHP**
@@ -113,38 +113,36 @@ El proyecto sigue el patrón **MVC (Model-View-Controller)** de Laravel:
    composer install
    ```
 
+   **Nota: Esta instalacion suele tomar bastante tiempo**
+
 3. **Instalar dependencias JavaScript**
    ```bash
    npm install
    ```
 
 4. **Configurar variables de entorno**
+
+   Comando para usar .env con base de datos local:
+
    ```bash
    cp .env.example .env
    ```
-   
-   Editar el archivo `.env` con la configuración de tu entorno:
-   ```env
-   APP_NAME=ABI
-   APP_ENV=local
-   APP_KEY=
-   APP_DEBUG=true
-   APP_URL=http://localhost
-   
-   DB_CONNECTION=mysql
-   DB_HOST=127.0.0.1
-   DB_PORT=3306
-   DB_DATABASE=nombre_base_datos
-   DB_USERNAME=usuario_mysql
-   DB_PASSWORD=contraseña_mysql
+
+   Comando para usar .env con base de datos en la nube:
+
+   ```bash
+   cp .env.examplenube .env
    ```
+
+   **NOTA IMPORTANTE: Si usa la base de datos en linea omita el paso 6.**
+   
 
 5. **Generar clave de aplicación**
    ```bash
    php artisan key:generate
    ```
 
-6. **Levantamiento de la base de datos**
+6. **Levantamiento de la base de datos SOLO SI USA .env LOCAL**
    ```bash
    # En Windows powershell desde la raíz del proyecto
    .\scripts\set-db-roles.ps1
@@ -164,7 +162,7 @@ El proyecto sigue el patrón **MVC (Model-View-Controller)** de Laravel:
    php artisan serve
    ```
 
-La aplicación estará disponible en `http://localhost:8000`
+La aplicación estará disponible en `http://127.0.0.1:8000`
 
 ### Configuración de Base de Datos
 
