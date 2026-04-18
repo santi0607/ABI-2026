@@ -10,16 +10,24 @@ use App\Models\User;
 use App\Models\Version;
 use Illuminate\View\View;
 
+/**
+ * Exposes the immutable version history of each project idea in the idea bank.
+ *
+ * Versions are never created or edited manually here. This controller only reads
+ * the snapshots generated automatically when an author submits or corrects an idea.
+ */
 class ProjectVersionController extends Controller
 {
     /**
-     * Display the version history associated with the project.
+     * Shows the paginated version history for a project.
      */
     public function index(Project $project): View
     {
         $user = AuthUserHelper::fullUser();
         $this->authorizeHistoryAccess($project, $user);
 
+        // Load the project context once so the history view can render academic data
+        // and participants without issuing extra queries from Blade.
         $project->load([
             'projectStatus',
             'thematicArea.investigationLine',
@@ -36,11 +44,14 @@ class ProjectVersionController extends Controller
             ->paginate(10)
             ->withQueryString();
 
+        // Enrich every item with precomputed metadata so the Blade template can render
+        // a readable timeline without recomputing author, status, or counters.
         $versions->setCollection(
             $versions->getCollection()->values()->map(function (Version $version, int $index) use ($versions, $project, $totalVersions) {
                 $position = (($versions->currentPage() - 1) * $versions->perPage()) + $index;
                 $snapshot = $this->resolveSnapshot($project, $version);
 
+                // Keep a continuous human-friendly numbering even when the list is paginated.
                 $version->history_number = max($totalVersions - $position, 1);
                 $version->history_author = $this->resolveAuthorLabel($version);
                 $version->history_status = data_get($snapshot, 'project_status.name', 'Sin estado');
@@ -59,13 +70,15 @@ class ProjectVersionController extends Controller
     }
 
     /**
-     * Display an informational screen because versions are generated automatically.
+     * Shows an informational screen because versions are generated automatically.
      */
     public function create(Project $project): View
     {
         $user = AuthUserHelper::fullUser();
         $this->authorizeHistoryAccess($project, $user);
 
+        // Keep the REST resource shape intact while making it explicit that versions
+        // are created indirectly from project submissions and corrections.
         $project->load(['projectStatus', 'thematicArea.investigationLine']);
 
         return view('project-versions.create', [
@@ -74,13 +87,14 @@ class ProjectVersionController extends Controller
     }
 
     /**
-     * Show the full snapshot of a project version.
+     * Shows the full snapshot stored for a specific project version.
      */
     public function show(Project $project, Version $version): View
     {
         $user = AuthUserHelper::fullUser();
         $this->authorizeHistoryAccess($project, $user);
 
+        // Ensure the requested version actually belongs to the project in the URL.
         if ((int) $version->project_id !== (int) $project->id) {
             abort(404);
         }
@@ -95,6 +109,8 @@ class ProjectVersionController extends Controller
 
         $version->load(['createdBy.professor', 'createdBy.student', 'createdBy.researchstaff', 'contentVersions.content']);
 
+        // Always consume a unified snapshot shape so the view does not care whether
+        // the data comes from a stored JSON snapshot or reconstructed legacy records.
         $snapshot = $this->resolveSnapshot($project, $version);
         $totalVersions = Version::query()->where('project_id', $project->id)->count();
         $historyNumber = Version::query()
@@ -113,13 +129,14 @@ class ProjectVersionController extends Controller
     }
 
     /**
-     * Display an informational screen because versions are read-only.
+     * Shows an informational screen because versions are read-only.
      */
     public function edit(Project $project, Version $version): View
     {
         $user = AuthUserHelper::fullUser();
         $this->authorizeHistoryAccess($project, $user);
 
+        // Apply the same ownership guard used in show() so unrelated versions cannot be opened.
         if ((int) $version->project_id !== (int) $project->id) {
             abort(404);
         }
@@ -131,24 +148,30 @@ class ProjectVersionController extends Controller
     }
 
     /**
-     * Allow the history to be consulted by any authenticated user that can reach the project detail.
+     * Allows history access to any authenticated user who can reach the project detail.
      */
     protected function authorizeHistoryAccess(Project $project, ?User $user): void
     {
+        // For now authentication is enough. Keeping the check isolated makes it easy
+        // to centralize stricter role- or author-based rules later.
         if (! $user) {
             abort(403);
         }
     }
 
     /**
-     * Build a compatible snapshot for legacy and new versions.
+     * Builds a snapshot shape that works for both legacy and current versions.
      */
     protected function resolveSnapshot(Project $project, Version $version): array
     {
+        // Newer versions store a complete immutable JSON snapshot. When present, it is
+        // the source of truth because it matches the exact state submitted at that moment.
         if (is_array($version->snapshot) && ! empty($version->snapshot)) {
             return $version->snapshot;
         }
 
+        // Backward compatibility: rebuild older versions from their section rows so
+        // historical traceability is preserved even before JSON snapshots existed.
         $contents = $version->relationLoaded('contentVersions')
             ? $version->contentVersions
             : $version->contentVersions()->with('content')->get();
@@ -174,6 +197,8 @@ class ProjectVersionController extends Controller
                     return [$this->contentDisplayName($contentVersion->content->name) => $contentVersion->value];
                 })
                 ->toArray(),
+            // Older versions did not store frameworks in the snapshot, so reuse the
+            // current project relation to keep the methodological context visible.
             'frameworks' => $project->contentFrameworks
                 ->map(function ($contentFramework) {
                     return [
@@ -213,7 +238,7 @@ class ProjectVersionController extends Controller
     }
 
     /**
-     * Present readable labels even if the catalog data is stored without accents.
+     * Presents readable labels even when the catalog was stored without accents.
      */
     protected function contentDisplayName(?string $name): string
     {
@@ -234,7 +259,7 @@ class ProjectVersionController extends Controller
     }
 
     /**
-     * Resolve the best human-readable label for the user who generated the version.
+     * Resolves the most readable label for the user who generated the version.
      */
     protected function resolveAuthorLabel(Version $version): string
     {
@@ -243,6 +268,8 @@ class ProjectVersionController extends Controller
             return 'No disponible';
         }
 
+        // Resolve the author from the user's functional profile so the history makes
+        // clear who generated each submission in the workflow.
         if ($user->student) {
             return trim($user->student->name . ' ' . $user->student->last_name) . ' (Student)';
         }
